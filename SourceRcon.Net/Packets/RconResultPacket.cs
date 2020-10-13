@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Collections.Generic;
+using System.Text;
 
 namespace SourceRcon.Net.Packets
 {
@@ -15,9 +16,14 @@ namespace SourceRcon.Net.Packets
         {
             base.Deserialize();
 
-            var len = (int)(_packetWriter.BaseStream.Length - _packetWriter.BaseStream.Position - 1);
-            var bData = _packetReader.ReadBytes(len);
-            Result = Encoding.Default.GetString(bData);
+            byte b = 0;
+            var bData = new List<byte>();
+            while((b = _packetReader.ReadByte()) != '\0')
+            {
+                bData.Add(b);
+            }
+
+            Result = Encoding.Default.GetString(bData.ToArray());
         }
     }
 }

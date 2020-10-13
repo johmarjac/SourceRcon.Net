@@ -11,11 +11,7 @@ namespace SourceRcon.Net.Demo
 
         private async Task MainAsync()
         {
-            var config = new RconClientConfiguration()
-            {
-                Address = "127.0.0.1",
-                Port = 7779
-            };
+            var config = new RconClientConfiguration("213.202.242.24", 7600);
 
             try
             {
@@ -25,7 +21,7 @@ namespace SourceRcon.Net.Demo
 
                     if (client.Socket.Connected)
                     {
-                        if (await client.AuthenticateAsync("test"))
+                        if (await client.AuthenticateAsync("lolgetout"))
                         {
                             Console.WriteLine("Authentication successful!");
                             while (true)
@@ -43,7 +39,7 @@ namespace SourceRcon.Net.Demo
             }
             catch (Exception ex)
             {
-                throw ex;
+                Console.WriteLine(ex);
             }
 
             Console.ReadLine();
