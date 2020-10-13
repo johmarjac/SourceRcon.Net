@@ -22,8 +22,7 @@ namespace SourceRcon.Net.Packets
             {
                 bData.Add(b);
             }
-
-            Result = Encoding.Default.GetString(bData.ToArray());
+            Result = Encoding.UTF8.GetString(bData.ToArray());
         }
     }
 }
