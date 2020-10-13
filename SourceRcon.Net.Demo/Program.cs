@@ -11,7 +11,7 @@ namespace SourceRcon.Net.Demo
 
         private async Task MainAsync()
         {
-            var config = new RconClientConfiguration("213.202.242.24", 7600);
+            var config = new RconClientConfiguration("127.0.0.1", 7778);
 
             try
             {
@@ -21,7 +21,7 @@ namespace SourceRcon.Net.Demo
 
                     if (client.Socket.Connected)
                     {
-                        if (await client.AuthenticateAsync("lolgetout"))
+                        if (await client.AuthenticateAsync("test"))
                         {
                             Console.WriteLine("Authentication successful!");
                             while (true)
