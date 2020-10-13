@@ -1,5 +1,6 @@
 ﻿using SourceRcon.Net.Packets;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
@@ -17,9 +18,14 @@ namespace SourceRcon.Net
 
         public IRconConfiguration Configuration { get; }
 
+        public List<RconPacket> QueuedPackets { get; }
+
+        private static object _lockObj = new object();
+
         public RconClient()
         {
             Socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            QueuedPackets = new List<RconPacket>();
         }
 
         public RconClient(IRconConfiguration configuration) : this()
@@ -39,6 +45,28 @@ namespace SourceRcon.Net
             }
         }
 
+        public Task StartClientAsync()
+        {
+            Task.Factory.StartNew(async () =>
+            {
+                while(Socket.Connected)
+                {
+                    var packetSize = BitConverter.ToInt32(await ReceiveBytesAsync(4));
+                    var packetData = await ReceiveBytesAsync(packetSize);
+                    var packet = Activator.CreateInstance(typeof(RconPacket), packetData) as RconPacket;
+
+                    packet.Deserialize();
+
+                    lock(_lockObj)
+                    {
+                        QueuedPackets.Add(packet);
+                    }
+                }
+            });
+
+            return Task.CompletedTask;
+        }
+
         public async Task<bool> AuthenticateAsync(string rconPassword)
         {
             using (var packet = new RconPacket(0, 3))
@@ -49,7 +77,7 @@ namespace SourceRcon.Net
                 await SendAsync(packet.Buffer);
             }
 
-            return (await ReceivePacketAsync<RconAuthResultPacket>())
+            return (await ReceivePacketAsync<RconAuthResultPacket>(0))
                 .Authenticated;
         }
 
@@ -75,7 +103,8 @@ namespace SourceRcon.Net
 
         public async Task<TPacket> ExecuteCommandAsync<TPacket>(string command) where TPacket : RconPacket
         {
-            using(var packet = new RconPacket(1, 2))
+            var packetId = Environment.TickCount;
+            using(var packet = new RconPacket(packetId, 2))
             {
                 var data = Encoding.Default.GetBytes(command);
                 packet._packetWriter.Write(data, 0, data.Length);
@@ -83,19 +112,35 @@ namespace SourceRcon.Net
                 await SendAsync(packet.Buffer);
             }
 
-            return await ReceivePacketAsync<TPacket>();
+            return await ReceivePacketAsync<TPacket>(packetId);
         }
 
-        private async Task<TPacket> ReceivePacketAsync<TPacket>()
+        private async Task<TPacket> ReceivePacketAsync<TPacket>(int expectedPacketId)
             where TPacket : RconPacket
         {
-            var packetSize = BitConverter.ToInt32(await ReceiveBytesAsync(4));
-            var packetData = await ReceiveBytesAsync(packetSize);
-            var packet = Activator.CreateInstance(typeof(TPacket), packetData) as TPacket;
+            RconPacket packet = null;
 
-            packet.Deserialize();
+            await Task.Run(() =>
+            {
+                while (packet == null)
+                {
+                    lock (_lockObj)
+                    {
+                        packet = QueuedPackets.FirstOrDefault(x => x.PacketId == expectedPacketId);
+                    }
+                }
+            });
 
-            return packet;
+            lock(_lockObj)
+            {
+                QueuedPackets.Remove(packet);
+            }
+
+            var tPacket = Activator.CreateInstance(typeof(TPacket), packet.Buffer) as TPacket;
+
+            tPacket.Deserialize();
+
+            return tPacket;
         }
 
         private async Task SendAsync(byte[] bData)

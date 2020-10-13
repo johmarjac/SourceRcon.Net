@@ -11,18 +11,29 @@ namespace SourceRcon.Net.Demo
 
         private async Task MainAsync()
         {
-            var config = new RconClientConfiguration("127.0.0.1", 7778);
+            var config = new RconClientConfiguration("127.0.0.1", 7600);
 
             try
             {
                 using (var client = new RconClient(config))
                 {
                     await client.ConnectAsync();
+                    await client.StartClientAsync();
 
                     if (client.Socket.Connected)
                     {
                         if (await client.AuthenticateAsync("test"))
                         {
+                            _ = Task.Factory.StartNew(async () =>
+                            {
+                                while(true)
+                                {
+                                    await client.ExecuteCommandAsync<RconResultPacket>("string ping");
+                                    await Task.Delay(1000);
+                                    Console.WriteLine(client.QueuedPackets.Count);
+                                }
+                            });
+
                             Console.WriteLine("Authentication successful!");
                             while (true)
                             {
