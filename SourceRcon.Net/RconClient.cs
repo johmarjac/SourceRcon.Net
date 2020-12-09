@@ -115,7 +115,7 @@ namespace SourceRcon.Net
             return await ReceivePacketAsync<TPacket>(packetId);
         }
 
-        private async Task<TPacket> ReceivePacketAsync<TPacket>(int expectedPacketId)
+        public async Task<TPacket> ReceivePacketAsync<TPacket>(int expectedPacketId)
             where TPacket : RconPacket
         {
             RconPacket packet = null;
