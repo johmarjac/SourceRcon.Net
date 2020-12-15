@@ -1,5 +1,6 @@
 ﻿using SourceRcon.Net.Packets;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -18,14 +19,17 @@ namespace SourceRcon.Net
 
         public IRconConfiguration Configuration { get; }
 
-        public List<RconPacket> QueuedPackets { get; }
+        public SynchronizedCollection<RconResultPacket> QueuedPackets { get; }
+
+        public ConcurrentDictionary<int, RconResultPacket> QueuedCommandPackets { get; }
 
         private static object _lockObj = new object();
 
         public RconClient()
         {
             Socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            QueuedPackets = new List<RconPacket>();
+            QueuedPackets = new SynchronizedCollection<RconResultPacket>();
+            QueuedCommandPackets = new ConcurrentDictionary<int, RconResultPacket>();
         }
 
         public RconClient(IRconConfiguration configuration) : this()
@@ -53,13 +57,16 @@ namespace SourceRcon.Net
                 {
                     var packetSize = BitConverter.ToInt32(await ReceiveBytesAsync(4));
                     var packetData = await ReceiveBytesAsync(packetSize);
-                    var packet = Activator.CreateInstance(typeof(RconPacket), packetData) as RconPacket;
+                    var packet = Activator.CreateInstance(typeof(RconResultPacket), packetData) as RconResultPacket;
 
                     packet.Deserialize();
 
                     lock(_lockObj)
                     {
-                        QueuedPackets.Add(packet);
+                        if (QueuedCommandPackets.ContainsKey(packet.PacketId))
+                            QueuedCommandPackets[packet.PacketId] = packet;
+                        else
+                            QueuedPackets.Add(packet);
                     }
                 }
             });
@@ -69,6 +76,8 @@ namespace SourceRcon.Net
 
         public async Task<bool> AuthenticateAsync(string rconPassword)
         {
+            QueuedCommandPackets.TryAdd(0, null);
+
             using (var packet = new RconPacket(0, 3))
             {
                 var bPassword = Encoding.Default.GetBytes(rconPassword);
@@ -104,6 +113,9 @@ namespace SourceRcon.Net
         public async Task<TPacket> ExecuteCommandAsync<TPacket>(string command) where TPacket : RconPacket
         {
             var packetId = Environment.TickCount;
+
+            QueuedCommandPackets.TryAdd(packetId, null);
+
             using(var packet = new RconPacket(packetId, 2))
             {
                 var data = Encoding.Default.GetBytes(command);
@@ -115,10 +127,10 @@ namespace SourceRcon.Net
             return await ReceivePacketAsync<TPacket>(packetId);
         }
 
-        public async Task<TPacket> ReceivePacketAsync<TPacket>(int expectedPacketId)
+        public async Task<TPacket> ReceivePacketAsync<TPacket>(int expectedPacketId = -1)
             where TPacket : RconPacket
         {
-            RconPacket packet = null;
+            RconResultPacket packet = null;
 
             await Task.Run(() =>
             {
@@ -126,14 +138,26 @@ namespace SourceRcon.Net
                 {
                     lock (_lockObj)
                     {
-                        packet = QueuedPackets.FirstOrDefault(x => x.PacketId == expectedPacketId);
+                        if (expectedPacketId != -1)
+                            packet = QueuedCommandPackets.FirstOrDefault(x => x.Value != null && x.Value.PacketId == expectedPacketId).Value;
+                        else
+                            packet = QueuedPackets.FirstOrDefault();
                     }
                 }
             });
 
-            lock(_lockObj)
+            if (packet == null)
+                return null;
+
+            lock (_lockObj)
             {
-                QueuedPackets.Remove(packet);
+                if (packet != null)
+                {
+                    if (QueuedCommandPackets.ContainsKey(packet.PacketId))
+                        QueuedCommandPackets.Remove(packet.PacketId, out var p);
+                    else
+                        QueuedPackets.Remove(packet);
+                }
             }
 
             var tPacket = Activator.CreateInstance(typeof(TPacket), packet.Buffer) as TPacket;
